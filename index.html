@@ -1,0 +1,475 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>浏览器存储管理器</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --panel: #131b2e;
+  --line: #29364d;
+  --text: #e7edf8;
+  --muted: #91a0b8;
+  --accent: #78a9ff;
+  --danger: #ff7777;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.6 system-ui, -apple-system, sans-serif;
+}
+header {
+  padding: 22px 26px;
+  border-bottom: 1px solid var(--line);
+  background: #10172a;
+}
+h1 { font-size: 22px; margin: 0 0 5px; }
+h2 { font-size: 16px; margin: 0 0 14px; }
+p { margin: 5px 0; }
+.muted { color: var(--muted); font-size: 12px; }
+main { max-width: 1200px; margin: auto; padding: 22px; }
+.origin {
+  background: var(--panel);
+  padding: 12px 15px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  margin-bottom: 18px;
+  overflow-wrap: anywhere;
+}
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+button, input, textarea, select {
+  font: inherit;
+  color: var(--text);
+  background: #0d1526;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 11px;
+}
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.active, .primary { background: #23487e; border-color: #477dc6; }
+.danger { color: var(--danger); }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.toolbar input { flex: 1; min-width: 180px; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .85fr); gap: 16px; }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+.entries { display: flex; flex-direction: column; gap: 7px; }
+.entry {
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.entry:hover, .entry.selected { border-color: var(--accent); background: #18243a; }
+.entry-name { font-weight: 600; }
+.entry-value { color: var(--muted); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+label { display: block; margin: 12px 0 5px; color: var(--muted); }
+input, textarea, select { width: 100%; }
+textarea { min-height: 130px; resize: vertical; font-family: ui-monospace, monospace; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.notice { margin-top: 12px; color: var(--muted); font-size: 12px; }
+#status { margin: 12px 0; min-height: 22px; color: #91c9a5; }
+.hidden { display: none !important; }
+footer { padding: 20px; text-align: center; color: var(--muted); font-size: 12px; }
+@media(max-width: 720px) {
+  main { padding: 12px; }
+  header { padding: 18px 14px; }
+  .layout { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>浏览器存储管理器</h1>
+  <p class="muted">LocalStorage · SessionStorage · Cookies</p>
+</header>
+
+<main>
+  <div class="origin">
+    <strong>当前来源：</strong><span id="origin"></span>
+    <p class="muted">只能管理当前页面有权限访问的存储数据。</p>
+  </div>
+
+  <div class="tabs">
+    <button class="active" data-tab="local">LocalStorage</button>
+    <button data-tab="session">SessionStorage</button>
+    <button data-tab="cookies">Cookies</button>
+  </div>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <div class="toolbar">
+    <input id="search" placeholder="搜索名称或值..." aria-label="搜索">
+    <button id="refresh">刷新</button>
+    <button id="export">导出 JSON</button>
+    <button id="importBtn">导入 JSON</button>
+    <button id="clear" class="danger">清空当前类型</button>
+    <input id="file" type="file" accept=".json,application/json" class="hidden">
+  </div>
+
+  <div class="layout">
+    <section class="panel">
+      <h2 id="listTitle">存储条目</h2>
+      <div class="muted" id="count"></div>
+      <div class="entries" id="entries" style="margin-top:12px"></div>
+      <p class="notice">点击条目可以查看或编辑。Cookie 列表仅显示 document.cookie 可访问的项目。</p>
+    </section>
+
+    <section class="panel">
+      <h2 id="editorTitle">新增条目</h2>
+      <label for="key">名称 / Key</label>
+      <input id="key" autocomplete="off" placeholder="输入键名">
+
+      <label for="value">值 / Value</label>
+      <textarea id="value" placeholder="输入文本或 JSON 字符串"></textarea>
+
+      <div id="cookieOptions" class="hidden">
+        <label for="path">Path</label>
+        <input id="path" value="/" placeholder="/">
+
+        <label for="expires">过期时间（可选）</label>
+        <input id="expires" type="datetime-local">
+
+        <label for="sameSite">SameSite</label>
+        <select id="sameSite">
+          <option value="Lax">Lax</option>
+          <option value="Strict">Strict</option>
+          <option value="None">None（通常需要 Secure）</option>
+        </select>
+
+        <label>
+          <input id="secure" type="checkbox" style="width:auto">
+          Secure（仅 HTTPS 发送）
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="new" >新建</button>
+        <button id="save" class="primary">保存 / 修改</button>
+        <button id="delete" class="danger">删除选中项</button>
+        <button id="copy">复制值</button>
+      </div>
+      <p class="notice" id="editorHint"></p>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:16px">
+    <h2>JSON 导入说明</h2>
+    <p class="muted">导入格式为 JSON 对象，例如 {"theme":"dark","token":"example"}。导入会逐项写入当前存储；同名项目会被覆盖。Cookie 导入只尝试写入可访问的普通 Cookie。</p>
+  </section>
+</main>
+
+<footer>本地执行 · 不向任何服务器上传数据</footer>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let tab = 'local';
+  let selected = null;
+  let items = [];
+
+  $('origin').textContent = location.origin === 'null'
+    ? 'file://（本地文件，存储支持取决于浏览器）'
+    : location.origin;
+
+  function store() {
+    if (tab === 'local') return localStorage;
+    if (tab === 'session') return sessionStorage;
+    return null;
+  }
+
+  function cookieMap() {
+    const result = [];
+    if (!location.protocol.startsWith('http')) return result;
+    try {
+      document.cookie.split(';').forEach(part => {
+        const i = part.indexOf('=');
+        if (i < 0) return;
+        result.push({
+          key: part.slice(0, i).trim(),
+          value: part.slice(i + 1).trim()
+        });
+      });
+    } catch (e) {
+      setStatus('无法读取 Cookie：' + e.message, true);
+    }
+    return result;
+  }
+
+  function readItems() {
+    try {
+      if (tab === 'cookies') {
+        items = cookieMap();
+      } else {
+        const s = store();
+        items = Array.from({length: s.length}, (_, i) => {
+          const key = s.key(i);
+          return {key, value: s.getItem(key) ?? ''};
+        });
+      }
+    } catch (e) {
+      items = [];
+      setStatus('读取失败：' + e.message, true);
+    }
+    render();
+  }
+
+  function render() {
+    const q = $('search').value.toLowerCase();
+    const filtered = items.filter(x =>
+      x.key.toLowerCase().includes(q) ||
+      x.value.toLowerCase().includes(q)
+    );
+
+    $('entries').replaceChildren();
+    $('count').textContent = `共 ${items.length} 项，显示 ${filtered.length} 项`;
+    $('listTitle').textContent = {
+      local: 'LocalStorage 条目',
+      session: 'SessionStorage 条目',
+      cookies: '可访问的 Cookie'
+    }[tab];
+
+    $('cookieOptions').classList.toggle('hidden', tab !== 'cookies');
+    $('editorHint').textContent = tab === 'cookies'
+      ? 'Cookie 受 Path、Domain、Secure、SameSite 和浏览器策略限制。'
+      : '值按原始字符串保存；如需保存 JSON，请自行输入 JSON 文本。';
+
+    for (const item of filtered) {
+      const el = document.createElement('div');
+      el.className = 'entry' + (selected === item.key ? ' selected' : '');
+
+      const name = document.createElement('div');
+      name.className = 'entry-name';
+      name.textContent = item.key;
+
+      const val = document.createElement('div');
+      val.className = 'entry-value';
+      val.textContent = item.value.length > 180
+        ? item.value.slice(0, 180) + '…'
+        : item.value;
+
+      el.append(name, val);
+      el.addEventListener('click', () => selectItem(item));
+      $('entries').append(el);
+    }
+  }
+
+  function selectItem(item) {
+    selected = item.key;
+    $('key').value = item.key;
+    $('value').value = item.value;
+    $('editorTitle').textContent = '编辑条目';
+    render();
+  }
+
+  function resetEditor() {
+    selected = null;
+    $('key').value = '';
+    $('value').value = '';
+    $('editorTitle').textContent = '新增条目';
+    $('path').value = '/';
+    $('expires').value = '';
+    $('sameSite').value = 'Lax';
+    $('secure').checked = false;
+    render();
+  }
+
+  function setStatus(message, error = false) {
+    $('status').textContent = message;
+    $('status').style.color = error ? '#ff7777' : '#91c9a5';
+  }
+
+  function writeCookie(key, value, options = {}) {
+    if (!location.protocol.startsWith('http')) {
+      throw new Error('Cookie 操作需要 HTTP/HTTPS 页面，请通过本地服务器打开。');
+    }
+    let cookie = encodeURIComponent(key) + '=' + encodeURIComponent(value);
+    cookie += '; path=' + (options.path || '/');
+    cookie += '; SameSite=' + (options.sameSite || 'Lax');
+
+    if (options.expires) {
+      cookie += '; expires=' + new Date(options.expires).toUTCString();
+    }
+    if (options.secure) cookie += '; Secure';
+
+    document.cookie = cookie;
+
+    if (!cookieMap().some(x => x.key === key && x.value === value)) {
+      throw new Error('浏览器未接受该 Cookie。可能是 Secure、过期时间或浏览器策略限制。');
+    }
+  }
+
+  function deleteCookie(key) {
+    if (!location.protocol.startsWith('http')) {
+      throw new Error('Cookie 操作需要 HTTP/HTTPS 页面。');
+    }
+    // 只能删除当前路径下可访问、且允许脚本修改的 Cookie。
+    document.cookie = encodeURIComponent(key) +
+      '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax';
+    if (cookieMap().some(x => x.key === key)) {
+      throw new Error('Cookie 可能使用了其他 Path 或 Domain，或属于 HttpOnly Cookie。');
+    }
+  }
+
+  function saveItem() {
+    const key = $('key').value.trim();
+    const value = $('value').value;
+    if (!key) return setStatus('请填写 Key。', true);
+
+    try {
+      if (tab === 'cookies') {
+        writeCookie(key, value, {
+          path: $('path').value || '/',
+          expires: $('expires').value
+            ? new Date($('expires').value).toISOString()
+            : '',
+          sameSite: $('sameSite').value,
+          secure: $('secure').checked
+        });
+      } else {
+        store().setItem(key, value);
+      }
+
+      setStatus('保存成功。');
+      selected = key;
+      readItems();
+    } catch (e) {
+      setStatus('保存失败：' + e.message, true);
+    }
+  }
+
+  function deleteSelected() {
+    const key = selected || $('key').value.trim();
+    if (!key) return setStatus('请先选择或输入 Key。', true);
+    if (!confirm(`确定删除“${key}”吗？`)) return;
+
+    try {
+      if (tab === 'cookies') deleteCookie(key);
+      else store().removeItem(key);
+
+      selected = null;
+      resetEditor();
+      readItems();
+      setStatus('删除操作已执行。');
+    } catch (e) {
+      setStatus('删除失败：' + e.message, true);
+    }
+  }
+
+  $('save').addEventListener('click', saveItem);
+  $('delete').addEventListener('click', deleteSelected);
+  $('new').addEventListener('click', resetEditor);
+  $('refresh').addEventListener('click', readItems);
+  $('search').addEventListener('input', render);
+
+  $('copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText($('value').value);
+      setStatus('值已复制。');
+    } catch (e) {
+      setStatus('复制失败，请手动复制文本框内容。', true);
+    }
+  });
+
+  document.querySelectorAll('[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      tab = btn.dataset.tab;
+      selected = null;
+      document.querySelectorAll('[data-tab]').forEach(b =>
+        b.classList.toggle('active', b === btn)
+      );
+      resetEditor();
+      readItems();
+    });
+  });
+
+  $('clear').addEventListener('click', () => {
+    const label = {local:'LocalStorage',session:'SessionStorage',cookies:'Cookie'}[tab];
+    if (!confirm(`确定清空当前页面可管理的 ${label} 数据吗？此操作不可撤销。`)) return;
+
+    try {
+      if (tab === 'cookies') {
+        const before = cookieMap();
+        before.forEach(c => {
+          try { deleteCookie(c.key); } catch (_) {}
+        });
+      } else {
+        store().clear();
+      }
+      selected = null;
+      resetEditor();
+      readItems();
+      setStatus('清理操作已完成；受权限或 Path 限制的 Cookie 可能仍然存在。');
+    } catch (e) {
+      setStatus('清理失败：' + e.message, true);
+    }
+  });
+
+  $('export').addEventListener('click', () => {
+    const obj = {};
+    items.forEach(x => obj[x.key] = x.value);
+    const blob = new Blob([JSON.stringify(obj, null, 2)], {
+      type: 'application/json;charset=utf-8'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = tab + '-export.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus('导出文件已生成。');
+  });
+
+  $('importBtn').addEventListener('click', () => $('file').click());
+  $('file').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const obj = JSON.parse(await file.text());
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+        throw new Error('文件内容必须是 JSON 对象。');
+      }
+      if (!confirm(`将导入 ${Object.keys(obj).length} 项，并覆盖同名数据。继续吗？`)) return;
+
+      for (const [key, value] of Object.entries(obj)) {
+        if (tab === 'cookies') {
+          writeCookie(key, String(value));
+        } else {
+          store().setItem(key, String(value));
+        }
+      }
+      readItems();
+      setStatus('导入完成。');
+    } catch (err) {
+      setStatus('导入失败：' + err.message, true);
+    } finally {
+      e.target.value = '';
+    }
+  });
+
+  window.addEventListener('storage', () => {
+    if (tab === 'local') readItems();
+  });
+
+  try {
+    readItems();
+  } catch (e) {
+    setStatus('初始化失败：' + e.message, true);
+  }
+})();
+</script>
+</body>
+</html>
